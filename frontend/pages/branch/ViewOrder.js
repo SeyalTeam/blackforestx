@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import {
   Select,
@@ -34,6 +35,7 @@ const ViewOrder = ({ branchId }) => {
   const [dateFilter, setDateFilter] = useState([]);
   const [orderListTab, setOrderListTab] = useState('stock');
   const [editingOrder, setEditingOrder] = useState(null);
+  const [viewingOrder, setViewingOrder] = useState(null);
   const [todayAssignment, setTodayAssignment] = useState({});
   const [effectiveBranchId, setEffectiveBranchId] = useState(branchId);
 
@@ -128,7 +130,26 @@ const ViewOrder = ({ branchId }) => {
 
   // Handle edit order
   const handleEditOrder = (order) => {
-    setEditingOrder({ ...order, products: order.products.map(p => ({ ...p })) });
+    setEditingOrder({
+      ...order,
+      products: order.products.map(p => ({
+        ...p,
+        tempReceivedQty: p.receivedQty || 0,
+        confirmed: p.confirmed || false,
+      })),
+    });
+    setViewingOrder(null);
+  };
+
+  // Handle view order
+  const handleViewOrder = (order) => {
+    setViewingOrder(order);
+    setEditingOrder(null);
+  };
+
+  // Handle close view
+  const handleCloseView = () => {
+    setViewingOrder(null);
   };
 
   // Handle cancel edit
@@ -156,10 +177,11 @@ const ViewOrder = ({ branchId }) => {
     }));
   };
 
-  // Handle received qty edit
-  const handleReceivedQtyEdit = (index, value) => {
+  // Handle temp received qty edit
+  const handleTempReceivedQtyEdit = (index, value) => {
     if (!editingOrder) return;
-    const isKg = editingOrder.products[index].unit.toLowerCase().includes('kg');
+    const product = editingOrder.products[index];
+    const isKg = product.unit.toLowerCase().includes('kg');
     let parsedValue = isKg ? parseFloat(value) : parseInt(value, 10);
 
     if (isNaN(parsedValue) || parsedValue < 0) {
@@ -168,8 +190,7 @@ const ViewOrder = ({ branchId }) => {
       parsedValue = Math.floor(parsedValue);
     }
 
-    // Optional: Cap receivedQty at sendingQty
-    const sendingQty = editingOrder.products[index].sendingQty || 0;
+    const sendingQty = product.sendingQty || 0;
     if (parsedValue > sendingQty) {
       message.warning(`Received Qty cannot exceed Sending Qty (${sendingQty})`);
       parsedValue = sendingQty;
@@ -178,8 +199,22 @@ const ViewOrder = ({ branchId }) => {
     setEditingOrder(prev => ({
       ...prev,
       products: prev.products.map((p, i) =>
-        i === index ? { ...p, receivedQty: parsedValue } : p
+        i === index ? { ...p, tempReceivedQty: parsedValue } : p
       ),
+    }));
+  };
+
+  // Handle confirm received
+  const handleConfirmReceived = (index) => {
+    if (!editingOrder) return;
+    setEditingOrder(prev => ({
+      ...prev,
+      products: prev.products.map((p, i) => {
+        if (i === index && !p.confirmed) {
+          return { ...p, receivedQty: p.tempReceivedQty, confirmed: true };
+        }
+        return p;
+      }),
     }));
   };
 
@@ -291,10 +326,14 @@ const ViewOrder = ({ branchId }) => {
     },
     {
       title: 'Date',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      width: 150,
-      render: (date) => moment(date).format('DD-MM-YYYY HH:mm'),
+      key: 'date',
+      width: 200,
+      render: (_, record) => (
+        <div>
+          Order date: {moment(record.createdAt).format('DD-MM-YYYY HH:mm')}<br />
+          Delivery date: {record.deliveryDateTime ? moment(record.deliveryDateTime).format('DD-MM-YYYY HH:mm') : 'N/A'}
+        </div>
+      ),
     },
     {
       title: 'Status',
@@ -304,11 +343,22 @@ const ViewOrder = ({ branchId }) => {
       render: (status) => status.charAt(0).toUpperCase() + status.slice(1),
     },
     {
-      title: 'Total',
+      title: 'Req Total',
       dataIndex: 'totalWithGST',
       key: 'totalWithGST',
       width: 100,
       render: (total) => `₹${total.toFixed(2)}`,
+    },
+    {
+      title: 'Snd Total',
+      key: 'sndTotal',
+      width: 100,
+      render: (_, record) => {
+        const sndSubtotal = record.products.reduce((sum, p) => sum + ((p.sendingQty || 0) * (p.price || 0)), 0);
+        const sndGST = record.products.reduce((sum, p) => sum + (p.gstRate === "non-gst" ? 0 : ((p.sendingQty || 0) * (p.price || 0) * (p.gstRate || 0) / 100)), 0);
+        const sndTotal = sndSubtotal + sndGST;
+        return `₹${sndTotal.toFixed(2)}`;
+      },
     },
     {
       title: 'Actions',
@@ -316,24 +366,21 @@ const ViewOrder = ({ branchId }) => {
       width: 200,
       render: (_, record) => (
         <Space>
-          {/* Removed View redirect for now; re-enable if single-order page needed */}
+          <Button
+            type="link"
+            icon={<EyeOutlined />}
+            onClick={() => handleViewOrder(record)}
+          />
           <Button
             type="link"
             icon={<EditOutlined />}
             onClick={() => handleEditOrder(record)}
-            disabled={!['draft', 'neworder', 'pending'].includes(record.status)}
-          >
-            Edit
-          </Button>
-          {record.status === 'completed' && (
-            <Button
-              type="link"
-              icon={<PrinterOutlined />}
-              onClick={() => handlePrintOrder(record)}
-            >
-              Print
-            </Button>
-          )}
+          />
+          <Button
+            type="link"
+            icon={<PrinterOutlined />}
+            onClick={() => handlePrintOrder(record)}
+          />
         </Space>
       ),
     },
@@ -371,7 +418,7 @@ const ViewOrder = ({ branchId }) => {
           }}
           title={sendingQty === undefined || sendingQty === 0 ? 'No sending qty assigned' : `Sending: ${sendingQty}${record.unit || ''}`}
         >
-          {sendingQty || 0}{record.unit ? ` ${record.unit}` : ''}
+          {sendingQty || 0}
         </span>
       ),
     },
@@ -380,19 +427,108 @@ const ViewOrder = ({ branchId }) => {
       dataIndex: 'receivedQty',
       key: 'receivedQty',
       render: (receivedQty, record, index) => (
-        <InputNumber
-          min={0}
-          value={receivedQty}
-          onChange={(value) => handleReceivedQtyEdit(index, value)}
-          step={record.unit.toLowerCase().includes('kg') ? 0.1 : 1}
-          style={{ width: 80 }}
-          placeholder="0"
-        />
+        <Space>
+          {record.confirmed ? (
+            <span>{record.receivedQty || 0}</span>
+          ) : (
+            <InputNumber
+              min={0}
+              value={record.tempReceivedQty}
+              onChange={(value) => handleTempReceivedQtyEdit(index, value)}
+              step={record.unit.toLowerCase().includes('kg') ? 0.1 : 1}
+              style={{ width: 80 }}
+              placeholder="0"
+            />
+          )}
+          <Button
+            style={{
+              backgroundColor: record.confirmed ? 'green' : 'red',
+              color: 'white',
+            }}
+            onClick={() => handleConfirmReceived(index)}
+            disabled={record.confirmed}
+          >
+            {record.confirmed ? 'Confirmed' : 'Confirm'}
+          </Button>
+        </Space>
       ),
     },
-    { title: 'Unit', dataIndex: 'unit', key: 'unit', render: (unit) => unit || 'N/A' },
-    { title: 'Price', dataIndex: 'price', key: 'price', render: (price) => `₹${price.toFixed(2)}` },
-    { title: 'Total', dataIndex: 'productTotal', key: 'productTotal', render: (_, record) => `₹${(record.quantity * record.price).toFixed(2)}` },
+    {
+      title: 'Unit Price',
+      key: 'unitPrice',
+      render: (_, record) => `${record.unit || 'N/A'} ₹${(record.price || 0).toFixed(2)}`,
+    },
+    {
+      title: 'Req Total',
+      key: 'reqTotal',
+      render: (_, record) => `₹${((record.quantity || 0) * (record.price || 0)).toFixed(2)}`,
+    },
+    {
+      title: 'Snd Total',
+      key: 'sndTotal',
+      render: (_, record) => `₹${((record.sendingQty || 0) * (record.price || 0)).toFixed(2)}`,
+    },
+    {
+      title: 'Rec Total',
+      key: 'recTotal',
+      render: (_, record) => `₹${((record.receivedQty || 0) * (record.price || 0)).toFixed(2)}`,
+    },
+  ];
+
+  // View columns (read-only version)
+  const viewColumns = [
+    { title: 'Item', dataIndex: 'name', key: 'name' },
+    {
+      title: 'Quantity',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      render: (quantity) => `${quantity}`,
+    },
+    {
+      title: 'Sending Qty',
+      dataIndex: 'sendingQty',
+      key: 'sendingQty',
+      render: (sendingQty, record) => (
+        <span
+          style={{
+            color: sendingQty > 0 ? '#52c41a' : '#d9d9d9',
+            fontWeight: sendingQty > 0 ? 'bold' : 'normal',
+            display: 'inline-block',
+            minWidth: '70px',
+            textAlign: 'center',
+          }}
+          title={sendingQty === undefined || sendingQty === 0 ? 'No sending qty assigned' : `Sending: ${sendingQty}${record.unit || ''}`}
+        >
+          {sendingQty || 0}
+        </span>
+      ),
+    },
+    {
+      title: 'Received Qty',
+      dataIndex: 'receivedQty',
+      key: 'receivedQty',
+      render: (receivedQty) => `${receivedQty || 0}`,
+    },
+    {
+      title: 'Unit Price',
+      key: 'unitPrice',
+      render: (_, record) => `${record.unit || 'N/A'} ₹${(record.price || 0).toFixed(2)}`,
+    },
+    {
+      title: 'Req Total',
+      key: 'reqTotal',
+      render: (_, record) => `₹${((record.quantity || 0) * (record.price || 0)).toFixed(2)}`,
+    },
+    {
+      title: 'Snd Total',
+      key: 'sndTotal',
+      render: (_, record) => `₹${((record.sendingQty || 0) * (record.price || 0)).toFixed(2)}`,
+    },
+    {
+      title: 'Rec Total',
+      key: 'recTotal',
+      render: (_, record) => `₹${((record.receivedQty || 0) * (record.price || 0)).toFixed(2)}`,
+    },
   ];
 
   return (
@@ -424,7 +560,7 @@ const ViewOrder = ({ branchId }) => {
 
           {orderLoading ? (
             <div style={{ textAlign: 'center', padding: '40px' }}>
-              <Spin size=" personally large" />
+              <Spin size="large" />
             </div>
           ) : (
             <>
@@ -492,6 +628,8 @@ const ViewOrder = ({ branchId }) => {
                 >
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <Text><strong>Status:</strong> {editingOrder.status.charAt(0).toUpperCase() + editingOrder.status.slice(1)}</Text>
+                    <Text><strong>Order Date:</strong> {moment(editingOrder.createdAt).format('DD-MM-YYYY HH:mm')}</Text>
+                    <Text><strong>Delivery Date:</strong> {editingOrder.deliveryDateTime ? moment(editingOrder.deliveryDateTime).format('DD-MM-YYYY HH:mm') : 'N/A'}</Text>
                     <Table
                       dataSource={editingOrder.products}
                       columns={editColumns}
@@ -506,8 +644,9 @@ const ViewOrder = ({ branchId }) => {
                           <Table.Summary.Cell>{editingOrder.products.reduce((sum, p) => sum + (p.sendingQty || 0), 0)}</Table.Summary.Cell>
                           <Table.Summary.Cell>{editingOrder.products.reduce((sum, p) => sum + (p.receivedQty || 0), 0)}</Table.Summary.Cell>
                           <Table.Summary.Cell>N/A</Table.Summary.Cell>
-                          <Table.Summary.Cell>₹{editingOrder.products.reduce((sum, p) => sum + (p.price || 0), 0).toFixed(2)}</Table.Summary.Cell>
-                          <Table.Summary.Cell>₹{editingOrder.products.reduce((sum, p) => sum + (p.productTotal || 0), 0).toFixed(2)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>₹{editingOrder.products.reduce((sum, p) => sum + ((p.quantity || 0) * (p.price || 0)), 0).toFixed(2)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>₹{editingOrder.products.reduce((sum, p) => sum + ((p.sendingQty || 0) * (p.price || 0)), 0).toFixed(2)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>₹{editingOrder.products.reduce((sum, p) => sum + ((p.receivedQty || 0) * (p.price || 0)), 0).toFixed(2)}</Table.Summary.Cell>
                         </Table.Summary.Row>
                       )}
                     />
@@ -524,6 +663,52 @@ const ViewOrder = ({ branchId }) => {
                         style={{ width: 150 }}
                       >
                         Save
+                      </Button>
+                    </Space>
+                  </Space>
+                </Card>
+              )}
+
+              {viewingOrder && (
+                <Card
+                  title={<Title level={4} style={{ margin: 0, color: '#34495e' }}>View Order: {viewingOrder.billNo}</Title>}
+                  style={{
+                    borderRadius: '12px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    background: '#fff',
+                    marginTop: '20px',
+                  }}
+                >
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Text><strong>Status:</strong> {viewingOrder.status.charAt(0).toUpperCase() + viewingOrder.status.slice(1)}</Text>
+                    <Text><strong>Order Date:</strong> {moment(viewingOrder.createdAt).format('DD-MM-YYYY HH:mm')}</Text>
+                    <Text><strong>Delivery Date:</strong> {viewingOrder.deliveryDateTime ? moment(viewingOrder.deliveryDateTime).format('DD-MM-YYYY HH:mm') : 'N/A'}</Text>
+                    <Table
+                      dataSource={viewingOrder.products}
+                      columns={viewColumns}
+                      pagination={false}
+                      rowKey="_id"
+                      bordered
+                      scroll={{ x: 1000 }}
+                      summary={() => (
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell>Total</Table.Summary.Cell>
+                          <Table.Summary.Cell>{viewingOrder.products.reduce((sum, p) => sum + (p.quantity || 0), 0)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>{viewingOrder.products.reduce((sum, p) => sum + (p.sendingQty || 0), 0)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>{viewingOrder.products.reduce((sum, p) => sum + (p.receivedQty || 0), 0)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>N/A</Table.Summary.Cell>
+                          <Table.Summary.Cell>₹{viewingOrder.products.reduce((sum, p) => sum + ((p.quantity || 0) * (p.price || 0)), 0).toFixed(2)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>₹{viewingOrder.products.reduce((sum, p) => sum + ((p.sendingQty || 0) * (p.price || 0)), 0).toFixed(2)}</Table.Summary.Cell>
+                          <Table.Summary.Cell>₹{viewingOrder.products.reduce((sum, p) => sum + ((p.receivedQty || 0) * (p.price || 0)), 0).toFixed(2)}</Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      )}
+                    />
+                    <Space style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+                      <Button
+                        onClick={handleCloseView}
+                        style={{ width: 150 }}
+                      >
+                        Close
                       </Button>
                     </Space>
                   </Space>

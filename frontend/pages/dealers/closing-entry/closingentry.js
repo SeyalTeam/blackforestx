@@ -21,10 +21,6 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import BranchHeader from '../../../components/BranchHeader';
-import Chart from 'chart.js/auto';
-import ChartDataLabels from 'chartjs-plugin-datalabels';
-
-Chart.register(ChartDataLabels);
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -61,10 +57,6 @@ const ClosingEntry = () => {
   const [totalPayments, setTotalPayments] = useState(0);
   const [discrepancy, setDiscrepancy] = useState(0);
   const [lastSubmittedDate, setLastSubmittedDate] = useState(null);
-  const [closingEntries, setClosingEntries] = useState([]);
-
-  const chartRef = useRef(null);
-  const chartInstanceRef = useRef(null);
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://apib.theblackforestcakes.com';
 
@@ -95,28 +87,6 @@ const ClosingEntry = () => {
     }
   };
 
-  const fetchClosingEntries = async (branchId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${BACKEND_URL}/api/closing-entries`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      const result = await response.json();
-      if (response.ok) {
-        const branchEntries = result.filter(entry => entry.branchId?._id === branchId);
-        setClosingEntries(branchEntries);
-      } else {
-        message.error('Failed to fetch closing entries');
-      }
-    } catch (err) {
-      message.error('Error fetching closing entries');
-    }
-  };
-
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -132,7 +102,6 @@ const ClosingEntry = () => {
       if (decoded.branchId) {
         setBranchId(decoded.branchId);
         fetchBranchDetails(token, decoded.branchId);
-        fetchClosingEntries(decoded.branchId);
       } else {
         message.error('No branch associated with this user');
         router.push('/login');
@@ -142,50 +111,6 @@ const ClosingEntry = () => {
       router.push('/login');
     }
   }, [router]);
-
-  useEffect(() => {
-    if (!branchId || closingEntries.length === 0) return;
-    const id = router.query.id;
-    if (id) {
-      const entry = closingEntries.find(entry => entry._id === id);
-      if (entry) {
-        populateForm(entry);
-        if (router.query.id !== entry._id) {
-          router.push(`/dealers/closing-entry/closingentry?id=${entry._id}`, undefined, { shallow: true });
-        }
-      } else {
-        message.error('Closing entry not found');
-      }
-    }
-  }, [router.query.id, closingEntries, branchId, router.push]);
-
-  const populateForm = (entry) => {
-    setClosingEntryId(entry._id);
-    setDate(dayjs(entry.date));
-    setSystemSales(entry.systemSales || '');
-    setManualSales(entry.manualSales || '');
-    setOnlineSales(entry.onlineSales || '');
-    setExpenses(entry.expenses || '');
-    setExpenseDetails(
-      entry.expenseDetails ? entry.expenseDetails.map((detail, index) => ({
-        serialNo: index + 1,
-        reason: detail.reason || '',
-        recipient: detail.recipient || '',
-        amount: detail.amount || '',
-      })) : []
-    );
-    setCreditCardPayment(entry.creditCardPayment || '');
-    setUpiPayment(entry.upiPayment || '');
-    setCashPayment(entry.cashPayment || '');
-    setDenom2000(entry.denom2000 || '');
-    setDenom500(entry.denom500 || '');
-    setDenom200(entry.denom200 || '');
-    setDenom100(entry.denom100 || '');
-    setDenom50(entry.denom50 || '');
-    setDenom20(entry.denom20 || '');
-    setDenom10(entry.denom10 || '');
-    setIsSubmitted(true);
-  };
 
   useEffect(() => {
     const totalExpenses = expenseDetails.reduce((sum, detail) => sum + (Number(detail.amount) || 0), 0);
@@ -240,177 +165,6 @@ const ClosingEntry = () => {
     const interval = setInterval(checkMidnight, 60000);
     return () => clearInterval(interval);
   }, [lastSubmittedDate]);
-
-  useEffect(() => {
-    if (closingEntries.length === 0 || !chartRef.current) return;
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy();
-    }
-
-    const currentMonth = 4; // May (0-based index)
-    const currentYear = 2025;
-    const daysInMonth = 31;
-
-    const labels = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
-
-    const totalSalesData = new Array(daysInMonth).fill(0);
-    const totalPaymentsData = new Array(daysInMonth).fill(0);
-    const totalExpensesData = new Array(daysInMonth).fill(0);
-
-    closingEntries.forEach(entry => {
-      const entryDate = dayjs(entry.date);
-      if (
-        entryDate.year() === currentYear &&
-        entryDate.month() === currentMonth
-      ) {
-        const day = entryDate.date() - 1;
-        totalSalesData[day] += (entry.systemSales || 0) + (entry.manualSales || 0) + (entry.onlineSales || 0);
-        totalPaymentsData[day] += (entry.creditCardPayment || 0) + (entry.upiPayment || 0) + (entry.cashPayment || 0) + (entry.expenses || 0);
-        totalExpensesData[day] += entry.expenses || 0;
-      }
-    });
-
-    const ctx = chartRef.current.getContext('2d');
-    chartInstanceRef.current = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            label: 'Total Sales (₹)',
-            data: totalSalesData,
-            backgroundColor: 'rgba(54, 162, 235, 0.6)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 1,
-          },
-          {
-            label: 'Total Payments (₹)',
-            data: totalPaymentsData,
-            backgroundColor: 'rgba(255, 99, 132, 0.6)',
-            borderColor: 'rgba(255, 99, 132, 1)',
-            borderWidth: 1,
-          },
-          {
-            label: 'Total Expenses (₹)',
-            data: totalExpensesData,
-            backgroundColor: 'rgba(255, 206, 86, 0.6)',
-            borderColor: 'rgba(255, 206, 86, 1)',
-            borderWidth: 1,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            title: {
-              display: true,
-              text: 'Day of Month (May 2025)',
-            },
-            grid: {
-              display: false,
-            },
-          },
-          y: {
-            beginAtZero: true,
-            title: {
-              display: true,
-              text: 'Amount (₹)',
-            },
-            ticks: {
-              callback: function(value) {
-                return '₹' + value;
-              },
-            },
-          },
-        },
-        plugins: {
-          legend: {
-            position: 'top',
-          },
-          title: {
-            display: true,
-            text: 'Monthly Financial Overview (May 2025)',
-            font: {
-              size: 16,
-            },
-          },
-          datalabels: {
-            anchor: 'end',
-            align: 'top',
-            offset: (context) => {
-              const index = context.dataIndex;
-              const sales = totalSalesData[index];
-              const payments = totalPaymentsData[index];
-              return (sales === payments && sales !== 0) ? 15 : 0;
-            },
-            font: {
-              size: 12,
-              weight: 'bold',
-            },
-            padding: (context) => {
-              const value = context.dataset.data[context.dataIndex];
-              return value === 0 ? 0 : 4;
-            },
-            borderRadius: (context) => {
-              const value = context.dataset.data[context.dataIndex];
-              return value === 0 ? 0 : 3;
-            },
-            backgroundColor: (context) => {
-              const value = context.dataset.data[context.dataIndex];
-              return value === 0 ? null : 'black';
-            },
-            color: (context) => {
-              const value = context.dataset.data[context.dataIndex];
-              return value === 0 ? 'black' : 'white';
-            },
-            formatter: (value, context) => {
-              const index = context.dataIndex;
-              const datasetIndex = context.datasetIndex;
-              const sales = totalSalesData[index];
-              const payments = totalPaymentsData[index];
-
-              if (datasetIndex === 2) {
-                return value === 0 ? '0' : `₹${value}`;
-              }
-
-              if (sales === payments && sales !== 0) {
-                if (datasetIndex === 0) {
-                  return `₹${value}`;
-                }
-                return '';
-              }
-
-              return value === 0 ? '0' : `₹${value}`;
-            },
-            display: (context) => {
-              const index = context.dataIndex;
-              const datasetIndex = context.datasetIndex;
-              const sales = totalSalesData[index];
-              const payments = totalPaymentsData[index];
-
-              if (datasetIndex === 2) {
-                return true;
-              }
-
-              if (sales === payments && sales !== 0) {
-                return datasetIndex === 0;
-              }
-
-              return context.dataset.data[context.dataIndex] !== 0;
-            },
-          },
-        },
-      },
-    });
-
-    return () => {
-      if (chartInstanceRef.current) {
-        chartInstanceRef.current.destroy();
-      }
-    };
-  }, [closingEntries]);
 
   const handleAddExpense = () => {
     const newSerialNo = expenseDetails.length + 1;
@@ -554,7 +308,6 @@ const ClosingEntry = () => {
         setIsSubmitted(true);
         setClosingEntryId(result.closingEntry._id);
         setLastSubmittedDate(date);
-        fetchClosingEntries(branchId);
         handleClearForm();
       } else {
         message.error(result.message || 'Failed to submit closing entry');
@@ -606,7 +359,6 @@ const ClosingEntry = () => {
       if (response.ok) {
         message.success('Closing entry updated successfully');
         setLastSubmittedDate(date);
-        fetchClosingEntries(branchId);
       } else {
         message.error(result.message || 'Failed to update closing entry');
       }
@@ -657,7 +409,6 @@ const ClosingEntry = () => {
       if (response.ok) {
         message.success('Closing entry finalized successfully');
         setLastSubmittedDate(date);
-        fetchClosingEntries(branchId);
         handleClearForm();
       } else {
         message.error(result.message || 'Failed to finalize closing entry');
@@ -692,74 +443,6 @@ const ClosingEntry = () => {
     router.push('/dealers/closing-entry/closingentry', undefined, { shallow: true });
     message.success('Form cleared successfully');
   };
-
-  const columns = [
-    {
-      title: 'S.No',
-      key: 'sno',
-      render: (text, record, index) => index + 1,
-      width: 60,
-    },
-    {
-      title: 'Date',
-      dataIndex: 'date',
-      key: 'date',
-      render: (date) => dayjs(date).format('YYYY-MM-DD'),
-      width: 100,
-    },
-    {
-      title: 'Total Sales',
-      key: 'totalSales',
-      render: (record) => `₹${(record.systemSales || 0) + (record.manualSales || 0) + (record.onlineSales || 0)}`,
-      width: 120,
-    },
-    {
-      title: 'Total Payments',
-      key: 'totalPayments',
-      render: (record) => `₹${(record.creditCardPayment || 0) + (record.upiPayment || 0) + (record.cashPayment || 0) + (record.expenses || 0)}`,
-      width: 120,
-    },
-    {
-      title: 'Difference',
-      key: 'difference',
-      render: (record) => {
-        const sales = (record.systemSales || 0) + (record.manualSales || 0) + (record.onlineSales || 0);
-        const payments = (record.creditCardPayment || 0) + (record.upiPayment || 0) + (record.cashPayment || 0) + (record.expenses || 0);
-        const diff = payments - sales;
-        let backgroundColor, textColor;
-        if (diff === 0) {
-          backgroundColor = '#52c41a';
-          textColor = '#ffffff';
-        } else if (diff < 0) {
-          backgroundColor = '#ff4d4f';
-          textColor = '#ffffff';
-        } else {
-          backgroundColor = '#fadb14';
-          textColor = '#000000';
-        }
-        return (
-          <Text style={{ backgroundColor, color: textColor, fontWeight: 'bold', padding: '4px 8px', borderRadius: '4px' }}>
-            ₹{diff}
-          </Text>
-        );
-      },
-      width: 120,
-    },
-    {
-      title: 'Expenses',
-      dataIndex: 'expenses',
-      key: 'expenses',
-      render: (value) => `₹${value || 0}`,
-      width: 100,
-    },
-    {
-      title: 'Created At',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      render: (date) => dayjs(date).format('YYYY-MM-DD hh:mm A'),
-      width: 160,
-    },
-  ];
 
   const expenseColumns = [
     {
@@ -1392,51 +1075,6 @@ const ClosingEntry = () => {
                   </Space>
                 </Card>
               </div>
-
-              <Card
-                title={<Title level={4} style={{ margin: 0, color: '#34495e' }}>Closing Entries</Title>}
-                style={{
-                  borderRadius: '12px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  background: '#fff',
-                  marginTop: '40px',
-                }}
-              >
-                {closingEntries.length === 0 ? (
-                  <Text style={{ display: 'block', textAlign: 'center', padding: '20px' }}>
-                    No closing entries found for this branch.
-                  </Text>
-                ) : (
-                  <Table
-                    columns={columns}
-                    dataSource={closingEntries}
-                    rowKey="_id"
-                    pagination={{ pageSize: 5 }}
-                    bordered
-                  />
-                )}
-              </Card>
-
-              <Card
-                title={<Title level={4} style={{ margin: 0, color: '#34495e' }}>Monthly Financial Overview</Title>}
-                style={{
-                  borderRadius: '12px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  background: '#fff',
-                  marginTop: '40px',
-                  marginBottom: '40px',
-                }}
-              >
-                {closingEntries.length === 0 ? (
-                  <Text style={{ display: 'block', textAlign: 'center', padding: '20px' }}>
-                    No data available for the current month.
-                  </Text>
-                ) : (
-                  <div style={{ position: 'relative', height: '400px', width: '100%' }}>
-                    <canvas ref={chartRef}></canvas>
-                  </div>
-                )}
-              </Card>
             </>
           )}
         </div>
