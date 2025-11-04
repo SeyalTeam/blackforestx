@@ -38,7 +38,7 @@ const ClosingEntry = () => {
   const [branchName, setBranchName] = useState('');
   const [userName, setUserName] = useState('User');
   const [date, setDate] = useState(dayjs());
-  const [systemSales, setSystemSales] = useState('');
+  const [systemSales, setSystemSales] = useState(0);
   const [manualSales, setManualSales] = useState('');
   const [onlineSales, setOnlineSales] = useState('');
   const [expenses, setExpenses] = useState('');
@@ -422,7 +422,7 @@ const ClosingEntry = () => {
 
   const handleClearForm = () => {
     setDate(dayjs());
-    setSystemSales('');
+    setSystemSales(0);
     setManualSales('');
     setOnlineSales('');
     setExpenses('');
@@ -611,6 +611,7 @@ const ClosingEntry = () => {
                         style={{ width: '100%' }}
                         size="large"
                         controls={false}
+                        disabled={branchId !== '6841d9b7b5a0fc5644db5b18'}
                       />
 
                       <Text strong>Manual Sales (₹):</Text>
