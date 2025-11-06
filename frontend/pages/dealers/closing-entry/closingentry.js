@@ -611,7 +611,7 @@ const ClosingEntry = () => {
                         style={{ width: '100%' }}
                         size="large"
                         controls={false}
-                        disabled={branchId !== '6841d9b7b5a0fc5644db5b18'}
+                        disabled={!['6841d9b7b5a0fc5644db5b18', '67e1a4b22191787a139a749f'].includes(branchId)}
                       />
 
                       <Text strong>Manual Sales (₹):</Text>
